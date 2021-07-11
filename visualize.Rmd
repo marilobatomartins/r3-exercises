@@ -1,0 +1,230 @@
+---
+title: "Visualize"
+author: "marilobatomartins"
+date: "11/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read Code
+
+```{r}
+# libraries
+library(here) #define a rota de salvar os arquivos no diretório de trabalho atual 
+library(readr)
+library(DT)
+
+# variables - baixar dados diretamente da internet usando read_csv
+url_ac <- "https://oceanview.pfeg.noaa.gov/erddap/tabledap/cciea_AC.csv"
+# if ERDDAP server down (Error in download.file) with URL above, use this:
+#    url_ac <- "https://raw.githubusercontent.com/noaa-iea/r3-train/master/data/cciea_AC.csv"
+csv_ac <- here("data/cciea_AC.csv")
+
+# download data
+if (!file.exists(csv_ac))
+  download.file(url_ac, csv_ac)
+
+# read data
+d_ac <- read_csv(csv_ac, col_names = F, skip = 2)
+names(d_ac) <- names(read_csv(csv_ac))
+
+# show data
+datatable(d_ac)
+```
+##Plots usando ggplot2
+###Plot de linha simples 
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# subset data - criando uma seleção dos dados originais baixados 
+d_coast <- d_ac %>% 
+  # select columns - selecionando a coluna da data e do dado em si que quero plotar como gráfico de linha
+  select(time, total_fisheries_revenue_coastwide) %>% 
+  # filter rows - filtrando as colunas sem nenhuma entrada (dado)
+  filter(!is.na(total_fisheries_revenue_coastwide))
+datatable(d_coast)
+```
+```{r}
+# ggplot object - criando o plot
+p_coast <- d_coast %>% 
+  # setup aesthetics - x é a data e y o dado selecionado
+  ggplot(aes(x = time, y = total_fisheries_revenue_coastwide)) +
+  # add geometry - tipo de gráfico a ser gerado
+  geom_line()
+
+# show plot
+p_coast
+```
+###Adicionando linha de tendência no gráfico de série temporal
+
+```{r}
+p_coast + 
+  geom_smooth(method = "lm") #utilizando o método de modelo linear 'lm'
+```
+
+```{r}
+p_coast + 
+  geom_smooth(method = "loess") #utilizando o método 'loess'
+```
+
+###Distribuição de valores: histogramas
+
+```{r}
+d_coast %>% 
+  # setup aesthetics
+  ggplot(aes(x = total_fisheries_revenue_coastwide)) +
+  # add geometry
+  geom_histogram()
+```
+###Série de plots lineares
+
+```{r}
+library(stringr)
+library(tidyr)
+
+d_region <- d_ac %>% 
+  # select columns - selecionando a coluna das datas e aquelas que começam seu nome com 'total_fisheries_revenue'
+  select(
+    time, 
+    starts_with("total_fisheries_revenue")) %>% 
+  # exclude column - excluindo a coluna do valor total, já que eu quero por região
+  select(-total_fisheries_revenue_coastwide) %>% 
+  # pivot longer
+  pivot_longer(-time) %>% 
+  # mutate region by stripping other 
+  mutate(
+    region = name %>% 
+      str_replace("total_fisheries_revenue_", "") %>% 
+      str_to_upper()) %>% 
+  # filter for not NA
+  filter(!is.na(value)) %>% 
+  # select columns
+  select(time, region, value)
+  
+# create plot object
+p_region <- ggplot(
+  d_region,
+  # aesthetics
+  aes(
+    x     = time, 
+    y     = value,
+    group = region,
+    color = region)) +
+  # geometry
+  geom_line()
+
+# show plot
+p_region
+```
+```{r}
+#alterando as legendas do gráfico 
+p_region <- p_region +
+  labs(
+    title  = "Fisheries Revenue",
+    x      = "Year",
+    y      = "Millions $ (year 2015)",
+    color  = "Region")
+p_region
+```
+###Múltiplos plots de uma mesma variável 
+
+```{r}
+p_region +
+  facet_wrap(vars(region)) #fazendo vários graficos do mesmo conjunto de dados do anterior mas dividindo por região
+```
+###Bar plots
+
+```{r}
+library(glue)
+library(lubridate)
+
+yr_max <- year(max(d_region$time))
+
+d_region %>% 
+  # filter by most recent time
+  filter(year(time) == yr_max) %>% 
+  # setup aesthetics
+  ggplot(aes(x = region, y = value, fill = region)) +
+  # add geometry
+  geom_col() +
+  # add labels
+  labs(
+    title  = glue("Fisheries Revenue for {yr_max}"),
+    x      = "Region",
+    y      = "Millions $ (year 2015)",
+    fill   = "Region")
+```
+
+###Boxplots
+
+```{r}
+d_region %>% 
+  # setup aesthetics
+  ggplot(aes(x = region, y = value, fill = region)) +
+  # add geometry
+  geom_boxplot() +
+  # add labels
+  labs(
+    title  = "Fisheries Revenue Variability",
+    x      = "Region",
+    y      = "Millions $ (year 2015)") +
+  # drop legend since redundant with x axis
+  theme(
+    legend.position = "none")
+```
+
+###Plot violino: outra possibilidade diante do boxplot
+
+```{r}
+p_region_violin <- d_region %>% 
+  # setup aesthetics
+  ggplot(aes(x = region, y = value, fill = region)) +
+  # add geometry
+  geom_violin() +
+  # add labels
+  labs(
+    title  = "Fisheries Revenue Variability",
+    x      = "Region",
+    y      = "Millions $ (year 2015)") +
+  # drop legend since redundant with x axis
+  theme(
+    legend.position = "none")
+p_region_violin
+```
+```{r}
+p_region_violin +
+  theme_classic()#alterando o tema do gráfico, ou seja, as cores
+```
+##Plots interativos
+###Tornando o ggplot interativo
+
+```{r}
+plotly::ggplotly(p_region)
+```
+
+###Criando séries temporais interativas
+
+```{r}
+library(dygraphs)
+
+d_region_wide <- d_region %>% #contruindo os dados no formato para gerar o gráfico interativo
+  mutate(
+    Year = year(time)) %>% 
+  select(Year, region, value) %>% 
+  pivot_wider(
+    names_from  = region,
+    values_from = value)
+datatable(d_region_wide)
+```
+```{r}
+#criando o gráfico interativo com seleção de tempo (permite dar zoom em um período de tempo escolhido pela pessoa)
+d_region_wide %>% 
+  dygraph() %>% 
+  dyRangeSelector()
+```
+
